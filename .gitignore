@@ -1,0 +1,20 @@
+# Node / React Frontend
+node_modules
+build
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Python Backend 2.0 
+_pycache_/
+venv/
+.venv/
+env/
+.env
+*.pyc
+
+# IDE / OS specific 2.0 
+.vscode/
+.DS_Store
