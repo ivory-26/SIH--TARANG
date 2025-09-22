@@ -1,0 +1,45 @@
+# FastAPI backend dependencies
+fastapi>=0.103.1
+uvicorn>=0.23.2
+pydantic>=2.3.0
+
+# Data processing
+numpy>=1.24.0
+xarray>=2023.1.0
+netCDF4>=1.6.4
+
+# HTTP and networking
+httpx>=0.24.1
+python-dotenv>=1.0.0
+
+# API documentation
+openapi-schema-pydantic>=1.2.4
+
+# AI/ML dependencies
+openai>=1.0.0  # Optional for GPT integration
+
+# Visualization
+plotly>=5.16.0
+matplotlib>=3.7.2
+
+# Database
+sqlalchemy>=2.0.20
+psycopg2-binary>=2.9.7  # PostgreSQL driver
+alembic>=1.12.0  # Database migrations
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
+
+# Logging
+loguru>=0.7.0
+
+# Development tools
+black>=23.7.0  # Code formatting
+isort>=5.12.0  # Import sorting
+flake8>=6.1.0  # Linting
+mypy>=1.5.1   # Type checking
+
+# Security
+python-jose>=3.3.0  # JWT tokens
+passlib>=1.7.4  # Password hashing
