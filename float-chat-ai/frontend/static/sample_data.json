@@ -1,0 +1,23 @@
+{
+  "responses": {
+    "avg_temp": {
+      "text": "Average temperature at 1000 m is approximately 2.10 °C.",
+      "data": { "metric": "temperature", "depth_m": 1000, "value": 2.1, "units": "°C" },
+      "plot": { "x": [0, 10, 20, 30, 40], "y": [2.1, 2.2, 2.0, 1.9, 1.8], "x_label": "Sample Index", "y_label": "Temperature (°C)", "reverse_y": false }
+    },
+    "salinity_profile": {
+      "text": "Here is a sample salinity profile (PSU) with depth.",
+      "data": { "metric": "salinity", "depth_profile": [0,50,100,200], "values": [35.0,34.8,34.6,34.5], "units": "PSU" },
+      "plot": { "x": [35.0,34.8,34.6,34.5], "y": [0,50,100,200], "x_label": "Salinity (PSU)", "y_label": "Depth (m)", "reverse_y": true }
+    },
+    "max_temp": {
+      "text": "Maximum recorded temperature in the sample set is 24.8 °C at shallow depths.",
+      "data": { "metric": "temperature", "value": 24.8, "units": "°C" }
+    }
+  },
+  "samples": [
+    "What's the average temperature at 1000 meters?",
+    "Show me a salinity profile",
+    "Find the maximum temperature in the dataset"
+  ]
+}
