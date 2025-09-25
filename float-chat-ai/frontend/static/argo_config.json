@@ -1,0 +1,107 @@
+{
+  "argo_floats": [
+    {
+      "id": "ARGO_001",
+      "name": "Float 001",
+      "latitude": 20.5,
+      "longitude": 65.2,
+      "lastUpdate": "2024-03-15",
+      "status": "Active",
+      "cycles": 45,
+      "maxDepth": 2000,
+      "region": "Arabian Sea",
+      "deploymentDate": "2023-01-15"
+    },
+    {
+      "id": "ARGO_002", 
+      "name": "Float 002",
+      "latitude": 18.7,
+      "longitude": 67.8,
+      "lastUpdate": "2024-03-14", 
+      "status": "Active",
+      "cycles": 32,
+      "maxDepth": 1800,
+      "region": "Arabian Sea",
+      "deploymentDate": "2023-02-20"
+    },
+    {
+      "id": "ARGO_003",
+      "name": "Float 003", 
+      "latitude": 22.1,
+      "longitude": 63.5,
+      "lastUpdate": "2024-03-13",
+      "status": "Inactive",
+      "cycles": 28,
+      "maxDepth": 2000,
+      "region": "Arabian Sea",
+      "deploymentDate": "2023-01-30"
+    },
+    {
+      "id": "ARGO_004",
+      "name": "Float 004",
+      "latitude": 19.3,
+      "longitude": 69.1,
+      "lastUpdate": "2024-03-16",
+      "status": "Active", 
+      "cycles": 51,
+      "maxDepth": 1900,
+      "region": "Arabian Sea",
+      "deploymentDate": "2022-12-10"
+    },
+    {
+      "id": "ARGO_005",
+      "name": "Float 005",
+      "latitude": 21.8,
+      "longitude": 64.7,
+      "lastUpdate": "2024-03-12",
+      "status": "Active",
+      "cycles": 39,
+      "maxDepth": 2000,
+      "region": "Arabian Sea", 
+      "deploymentDate": "2023-03-05"
+    }
+  ],
+  "parameters": [
+    {
+      "id": "temperature",
+      "name": "Temperature",
+      "unit": "°C",
+      "description": "Water temperature measurements"
+    },
+    {
+      "id": "salinity", 
+      "name": "Salinity",
+      "unit": "PSU",
+      "description": "Practical Salinity Units"
+    },
+    {
+      "id": "pressure",
+      "name": "Pressure", 
+      "unit": "dbar",
+      "description": "Water pressure in decibars"
+    },
+    {
+      "id": "oxygen",
+      "name": "Dissolved Oxygen",
+      "unit": "μmol/kg", 
+      "description": "Dissolved oxygen concentration"
+    }
+  ],
+  "graph_types": [
+    {
+      "id": "line",
+      "name": "Line Plot",
+      "description": "Connected line plot with markers"
+    },
+    {
+      "id": "scatter",
+      "name": "Scatter Plot", 
+      "description": "Individual data points"
+    },
+    {
+      "id": "profile",
+      "name": "Depth Profile",
+      "description": "Vertical profile plot (typically parameter vs depth)"
+    }
+  ]
+}

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.109/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.109/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%; 
+            height: 420px; 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        .cesium-widget-credits {
+            display: none !important;
+        }
+        .cesium-viewer .cesium-widget-credits {
+            display: none !important;
+        }
+        /* Ensure the container is visible */
+        #cesiumContainer {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+        }
+        #infoPanel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(42, 42, 42, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            font-family: sans-serif;
+            max-width: 200px;
+            display: none;
+        }
+        #parameterDialog {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            display: none;
+            z-index: 1000;
+            min-width: 300px;
+        }
+        .dialog-header {
+            font-weight: bold;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .form-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, input {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .btn-primary {
+            background-color: #007cba;
+            color: white;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="infoPanel">
+        <div id="floatInfo"></div>
+    </div>
+    
+    <div class="overlay" id="dialogOverlay"></div>
+    <div id="parameterDialog">
+        <div class="dialog-header">Configure Argo Float Visualization</div>
+        <div id="selectedFloatInfo"></div>
+        
+        <div class="form-group">
+            <label for="parameter">Parameter:</label>
+            <select id="parameter">
+                <option value="temperature">Temperature</option>
+                <option value="salinity">Salinity</option>
+                <option value="pressure">Pressure</option>
+                <option value="oxygen">Dissolved Oxygen</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="graphType">Graph Type:</label>
+            <select id="graphType">
+                <option value="line">Line Plot</option>
+                <option value="scatter">Scatter Plot</option>
+                <option value="profile">Depth Profile</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="xAxis">X-Axis:</label>
+            <select id="xAxis">
+                <option value="time">Time</option>
+                <option value="depth">Depth</option>
+                <option value="cycle">Cycle Number</option>
+                <option value="parameter">Parameter Value</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="yAxis">Y-Axis:</label>
+            <select id="yAxis">
+                <option value="parameter">Parameter Value</option>
+                <option value="depth">Depth</option>
+                <option value="time">Time</option>
+                <option value="cycle">Cycle Number</option>
+            </select>
+        </div>
+        
+        <div class="button-group">
+            <button class="btn-primary" onclick="generateGraph()">Generate Graph</button>
+            <button class="btn-secondary" onclick="closeDialog()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // Set your Cesium Ion access token here
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIyMGZiZTZjMy1jYmM4LTRiOTEtOGMwNy00ZGE5MzRkMTBmZDciLCJpZCI6MzQ0NjIyLCJpYXQiOjE3NTg4MjI1NTd9.bBllALgyCShASjn3JCB91D51oDo9ZdbIbXHkTAaDi1M';
+        
+        // Ensure Cesium is loaded before initializing
+        if (typeof Cesium === 'undefined') {
+            console.error('Cesium library not loaded');
+            document.getElementById('cesiumContainer').innerHTML = 
+                '<div style="display: flex; align-items: center; justify-content: center; height: 400px; background: #f0f0f0; border: 1px solid #ccc; color: #666;">' +
+                '<div style="text-align: center;">' +
+                '<h3>Cesium Library Loading...</h3>' +
+                '<p>Please wait while the map loads or refresh the page.</p>' +
+                '</div>' +
+                '</div>';
+        }
+
+        // Initialize Cesium viewer
+        let viewer;
+        try {
+            viewer = new Cesium.Viewer('cesiumContainer', {
+                terrainProvider: Cesium.createWorldTerrain(),
+                baseLayerPicker: false,
+                geocoder: false,
+                homeButton: false,
+                sceneModePicker: false,
+                navigationHelpButton: false,
+                animation: false,
+                timeline: false,
+                fullscreenButton: false,
+                vrButton: false,
+                infoBox: false,
+                selectionIndicator: false
+            });
+
+            // Hide Cesium credits
+            viewer.cesiumWidget.creditContainer.style.display = "none";
+            
+            console.log('Cesium viewer created successfully');
+        } catch (error) {
+            console.error('Failed to create Cesium viewer:', error);
+            document.getElementById('cesiumContainer').innerHTML = 
+                '<div style="display: flex; align-items: center; justify-content: center; height: 400px; background: #f0f0f0; border: 1px solid #ccc; color: #666;">' +
+                '<div style="text-align: center;">' +
+                '<h3>Map Loading Failed</h3>' +
+                '<p>Please check your Cesium Ion token and internet connection.</p>' +
+                '<p>Error: ' + error.message + '</p>' +
+                '</div>' +
+                '</div>';
+            return;
+        }
+
+        // Sample Argo float data (fake data for prototype)
+        const argoFloats = [
+            {
+                id: 'ARGO_001',
+                name: 'Float 001',
+                latitude: 20.5,
+                longitude: 65.2,
+                lastUpdate: '2024-03-15',
+                status: 'Active',
+                cycles: 45,
+                maxDepth: 2000
+            },
+            {
+                id: 'ARGO_002',
+                name: 'Float 002',
+                latitude: 18.7,
+                longitude: 67.8,
+                lastUpdate: '2024-03-14',
+                status: 'Active',
+                cycles: 32,
+                maxDepth: 1800
+            },
+            {
+                id: 'ARGO_003',
+                name: 'Float 003',
+                latitude: 22.1,
+                longitude: 63.5,
+                lastUpdate: '2024-03-13',
+                status: 'Inactive',
+                cycles: 28,
+                maxDepth: 2000
+            },
+            {
+                id: 'ARGO_004',
+                name: 'Float 004',
+                latitude: 19.3,
+                longitude: 69.1,
+                lastUpdate: '2024-03-16',
+                status: 'Active',
+                cycles: 51,
+                maxDepth: 1900
+            },
+            {
+                id: 'ARGO_005',
+                name: 'Float 005',
+                latitude: 21.8,
+                longitude: 64.7,
+                lastUpdate: '2024-03-12',
+                status: 'Active',
+                cycles: 39,
+                maxDepth: 2000
+            }
+        ];
+
+        let selectedFloat = null;
+
+        // Add Argo floats to the map
+        if (viewer && viewer.entities) {
+            argoFloats.forEach(float => {
+                const entity = viewer.entities.add({
+                id: float.id,
+                position: Cesium.Cartesian3.fromDegrees(float.longitude, float.latitude),
+                billboard: {
+                    image: float.status === 'Active' ? 
+                        'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9IiMwMDc5MkMiLz4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNiIgZmlsbD0iIzAwQkNENCIvPgo8L3N2Zz4=' :
+                        'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1zbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9IiM5OTk5OTkiLz4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNiIgZmlsbD0iI0NDQ0NDQyIvPgo8L3N2Zz4=',
+                    scale: 1.0,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM
+                },
+                label: {
+                    text: float.name,
+                    font: '12pt sans-serif',
+                    pixelOffset: new Cesium.Cartesian2(0, -50),
+                    fillColor: Cesium.Color.WHITE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE
+                },
+                floatData: float
+                });
+            });
+
+            // Set initial view to Arabian Sea region
+            viewer.camera.setView({
+                destination: Cesium.Cartesian3.fromDegrees(66.0, 20.0, 1000000)
+            });
+
+            // Handle click events
+            viewer.selectedEntityChanged.addEventListener(function(entity) {
+                if (entity && entity.floatData) {
+                    selectedFloat = entity.floatData;
+                    showFloatInfo(entity.floatData);
+                } else {
+                    hideFloatInfo();
+                }
+            });
+
+            // Handle double-click to open parameter dialog
+            viewer.cesiumWidget.canvas.addEventListener('dblclick', function(event) {
+                const pickedObject = viewer.scene.pick(viewer.camera.getPickRay(new Cesium.Cartesian2(event.clientX, event.clientY)));
+                if (pickedObject && pickedObject.id && pickedObject.id.floatData) {
+                    selectedFloat = pickedObject.id.floatData;
+                    openParameterDialog(selectedFloat);
+                }
+            });
+        }
+
+
+
+        function showFloatInfo(floatData) {
+            const infoPanel = document.getElementById('infoPanel');
+            const floatInfo = document.getElementById('floatInfo');
+            
+            floatInfo.innerHTML = `
+                <strong>${floatData.name}</strong><br>
+                ID: ${floatData.id}<br>
+                Position: ${floatData.latitude.toFixed(2)}°N, ${floatData.longitude.toFixed(2)}°E<br>
+                Status: ${floatData.status}<br>
+                Last Update: ${floatData.lastUpdate}<br>
+                Cycles: ${floatData.cycles}<br>
+                Max Depth: ${floatData.maxDepth}m<br>
+                <br><em>Double-click to configure visualization</em>
+            `;
+            
+            infoPanel.style.display = 'block';
+        }
+
+        function hideFloatInfo() {
+            document.getElementById('infoPanel').style.display = 'none';
+        }
+
+        function openParameterDialog(floatData) {
+            const dialog = document.getElementById('parameterDialog');
+            const overlay = document.getElementById('dialogOverlay');
+            const selectedFloatInfo = document.getElementById('selectedFloatInfo');
+            
+            selectedFloatInfo.innerHTML = `
+                <p><strong>Selected Float:</strong> ${floatData.name} (${floatData.id})</p>
+                <p><strong>Position:</strong> ${floatData.latitude.toFixed(2)}°N, ${floatData.longitude.toFixed(2)}°E</p>
+            `;
+            
+            overlay.style.display = 'block';
+            dialog.style.display = 'block';
+        }
+
+        function closeDialog() {
+            document.getElementById('parameterDialog').style.display = 'none';
+            document.getElementById('dialogOverlay').style.display = 'none';
+        }
+
+        function generateGraph() {
+            if (!selectedFloat) return;
+            
+            const parameter = document.getElementById('parameter').value;
+            const graphType = document.getElementById('graphType').value;
+            const xAxis = document.getElementById('xAxis').value;
+            const yAxis = document.getElementById('yAxis').value;
+            
+            // Create the configuration object
+            const config = {
+                floatId: selectedFloat.id,
+                floatName: selectedFloat.name,
+                parameter: parameter,
+                graphType: graphType,
+                xAxis: xAxis,
+                yAxis: yAxis,
+                latitude: selectedFloat.latitude,
+                longitude: selectedFloat.longitude
+            };
+            
+            // Use URL parameters to communicate with Streamlit
+            const configStr = encodeURIComponent(JSON.stringify(config));
+            const currentUrl = new URL(window.parent.location.href);
+            currentUrl.searchParams.set('argo_config', configStr);
+            window.parent.location.href = currentUrl.toString();
+            
+            closeDialog();
+        }
+
+        // Close dialog when clicking overlay
+        document.getElementById('dialogOverlay').addEventListener('click', closeDialog);
+    </script>
+</body>
+</html>
