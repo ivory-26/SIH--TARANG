@@ -3,9 +3,17 @@ import pandas as pd
 import numpy as np
 import pydeck as pdk
 import plotly.graph_objects as go
+import streamlit.components.v1 as components
 import time
 import json
+import os
 from datetime import datetime
+import re
+
+# Base directory and file paths
+BASE_DIR = os.path.dirname(__file__)
+SAMPLE_PATH = os.path.join(BASE_DIR, "static", "sample_data.json")
+CESIUM_MAP_PATH = os.path.join(BASE_DIR, "components", "cesium_map.html")
 
 # Set page config
 st.set_page_config(
@@ -15,17 +23,158 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Load sample data
+def load_samples():
+    try:
+        with open(SAMPLE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"responses": {}, "samples": []}
+
+def simulate_query(text: str):
+    """Simulate API response for demo purposes"""
+    sample_responses = SAMPLE.get("responses", {})
+    
+    # Find best matching response
+    for key, response in sample_responses.items():
+        if any(word.lower() in text.lower() for word in key.split()):
+            return response
+    
+    # Default response
+    return {
+        "response": f"Based on your query about '{text}', here's what I found from the Argo float data: This appears to be related to oceanographic measurements. The data shows various parameters like temperature, salinity, and pressure measurements from autonomous Argo floats deployed across different ocean regions.",
+        "data_summary": "Sample oceanographic data analysis",
+        "relevant_floats": ["5906334", "5906335", "5906336"]
+    }
+
+def get_sample_queries():
+    """Get sample queries from JSON file"""
+    return SAMPLE.get("samples", [
+        "Show me temperature profiles for the Arabian Sea",
+        "What's the salinity distribution in the Indian Ocean?",
+        "Display pressure measurements from recent Argo floats",
+        "Compare temperature variations across different depths"
+    ])
+
+SAMPLE = load_samples()
+
 # Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "history" not in st.session_state:
     st.session_state.history = []
+if "session_id" not in st.session_state:
+    st.session_state.session_id = "local_session"
+if "user_name" not in st.session_state:
+    st.session_state.user_name = "Guest"
 if "map_selection" not in st.session_state:
     st.session_state.map_selection = None
 if "selected_marker" not in st.session_state:
     st.session_state.selected_marker = None
 if "show_dialog" not in st.session_state:
     st.session_state.show_dialog = False
+if "sessions" not in st.session_state:
+    st.session_state.sessions = []  # list of {id, timestamp, config, source, reason, response_text, plot, data}
+if "active_session_id" not in st.session_state:
+    st.session_state.active_session_id = str(int(time.time()*1000))
+if "_committed_session_ids" not in st.session_state:
+    st.session_state._committed_session_ids = set()
+
+# --- Session Lifecycle Helpers ---
+def start_new_session(reason: str = "user-action"):
+    """Begin a fresh logical session. Does NOT remove existing committed visualizations
+    but clears any in-progress configuration (map_selection, selected_marker, dialog)."""
+    st.session_state.active_session_id = str(int(time.time()*1000))
+    st.session_state.selected_marker = None
+    st.session_state.show_dialog = False
+    st.session_state.map_selection = None
+    st.session_state.current_session_reason = reason
+
+def commit_visualization(config: dict, resp: dict | None = None):
+    """Persist the visualization config & response details to session history and
+    start a new session. Also schedules clearing of visual area on next rerun."""
+    sid = config.get("session_id") or st.session_state.active_session_id
+    if sid in st.session_state._committed_session_ids:
+        return
+    record = {
+        "id": sid,
+        "timestamp": datetime.utcnow().isoformat(),
+        "config": config,
+        "source": config.get("source", "manual"),
+        "reason": st.session_state.get("current_session_reason", "unknown"),
+        "response_text": resp.get("text") if resp else None,
+        "plot": resp.get("plot") if resp else None,
+        "data": resp.get("data") if resp else None,
+    }
+    st.session_state.sessions.append(record)
+    st.session_state._committed_session_ids.add(sid)
+    # Prepare next session id
+    st.session_state.active_session_id = str(int(time.time()*1000))
+    # Schedule clearing of visual section after rerun
+    st.session_state.clear_after_commit = True
+
+# Process deferred clearing of visual area if flagged
+if st.session_state.get("clear_after_commit"):
+    # Clear only if not viewing a specific session
+    if not st.session_state.get("view_session_id"):
+        st.session_state.map_selection = None
+    st.session_state.clear_after_commit = False
+
+# Sidebar session navigation (left side bar)
+with st.sidebar:
+    st.header("🗂️ Sessions")
+    if st.session_state.sessions:
+        for s in reversed(st.session_state.sessions[-50:]):
+            cfg = s["config"]
+            label = cfg.get("query") or f"{cfg.get('parameter','?')} {cfg.get('graphType','?')}"\
+                f" ({cfg.get('xAxis','?')} vs {cfg.get('yAxis','?')})"
+            if st.button(label, key=f"sessnav_{s['id']}"):
+                st.session_state.view_session_id = s['id']
+                st.rerun()
+    else:
+        st.caption("No sessions yet")
+    if st.session_state.get("view_session_id"):
+        if st.button("⬅️ Back to Explorer", key="back_explorer"):
+            st.session_state.view_session_id = None
+            st.rerun()
+
+# Dedicated session view page
+if st.session_state.get("view_session_id"):
+    sid = st.session_state.view_session_id
+    session_obj = next((s for s in st.session_state.sessions if s["id"] == sid), None)
+    st.title("📄 Session Detail")
+    if session_obj:
+        cfg = session_obj["config"]
+        st.markdown(f"**Session ID:** {sid}")
+        st.markdown(f"**Timestamp (UTC):** {session_obj['timestamp']}")
+        if cfg.get("query"):
+            st.markdown(f"**Query:** {cfg['query']}")
+        st.markdown(f"**Visualization:** {cfg.get('parameter','?').title()} {cfg.get('graphType','?').title()} — {cfg.get('floatName','')} ({cfg.get('xAxis')} vs {cfg.get('yAxis')})")
+        if session_obj.get("response_text"):
+            st.info(session_obj.get("response_text"))
+        plot_dict = session_obj.get("plot")
+        if plot_dict:
+            fig = go.Figure()
+            gtype = plot_dict.get("graph_type", "line")
+            if gtype == "scatter":
+                fig.add_trace(go.Scatter(x=plot_dict.get("x", []), y=plot_dict.get("y", []), mode="markers"))
+            elif gtype == "profile":
+                fig.add_trace(go.Scatter(x=plot_dict.get("x", []), y=plot_dict.get("y", []), mode="lines+markers"))
+                if plot_dict.get("reverse_y"):
+                    fig.update_yaxes(autorange="reversed")
+            else:
+                fig.add_trace(go.Scatter(x=plot_dict.get("x", []), y=plot_dict.get("y", []), mode="lines+markers"))
+            fig.update_xaxes(title=plot_dict.get("x_label", "X"))
+            fig.update_yaxes(title=plot_dict.get("y_label", "Y"))
+            fig.update_layout(height=500, title="Stored Visualization")
+            st.plotly_chart(fig, use_container_width=True)
+        if session_obj.get("data"):
+            with st.expander("Raw Data JSON"):
+                st.json(session_obj.get("data"))
+    else:
+        st.error("Session not found")
+    st.stop()
+
 
 # Custom CSS for the app
 st.markdown("""
@@ -107,6 +256,34 @@ st.markdown("""
 .info-value {
     color: #666;
 }
+/* Dark theme cleanup: eliminate white bars in parameter form & chat */
+div[data-testid="stForm"],
+div[data-testid="stForm"] > div,
+div[data-testid="stForm"] form,
+div[data-testid="stForm"] form > div {background: transparent !important; box-shadow:none !important; border:none !important;}
+
+/* Inputs/selects inside forms */
+div[data-testid="stForm"] div[data-baseweb],
+div[data-baseweb="select"] > div,
+div[data-baseweb="input"] > div {background:#1a1d21 !important; color:#e5e7eb !important; border:1px solid #2a2f36 !important;}
+
+/* Float info card restyle (remove white slab) */
+.float-info-card {background:rgba(30,32,36,0.85) !important; border:1px solid #2f343a !important; color:#e5e7eb !important;}
+.float-info-card .info-label {color:#9ca3af !important;}
+.float-info-card .info-value {color:#f3f4f6 !important;}
+
+/* Chat input area */
+div[data-testid="stChatInput"],
+div[data-testid="stChatInput"] > div {background:transparent !important; box-shadow:none !important; border:none !important;}
+div[data-testid="stChatInput"] textarea {background:#111418 !important; color:#f3f4f6 !important; border:1px solid #2a2f36 !important;}
+div[data-testid="stChatInput"] button {background:#2563eb !important; color:#fff !important; border:1px solid #1d4ed8 !important;}
+
+/* Remove stray full-width white blocks sometimes produced by blank markdown */
+div.block-container > div:has(> hr),
+div.block-container > div:empty {background:transparent !important;}
+
+/* Ensure map + parameter area unified */
+section.main > div {background:transparent !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -139,9 +316,39 @@ def get_axis_label(axis, parameter=None):
         elif parameter == "oxygen":
             return f"Oxygen ({get_parameter_unit('oxygen')})"
         else:
-            return parameter.title()
+            return parameter.title() if parameter else "Parameter"
     else:
-        return axis.title()
+        return axis.title() if axis else "Axis"
+
+def create_3d_cesium_map():
+    """Create a 3D Cesium map with Argo floats.""" 
+    st.subheader("🌍 3D Cesium Interactive Map")
+    
+    # Display the Cesium map using HTML component
+    cesium_html_path = os.path.join(BASE_DIR, "components", "cesium_map.html")
+    
+    try:
+        if os.path.exists(cesium_html_path):
+            with open(cesium_html_path, 'r', encoding='utf-8') as f:
+                cesium_html = f.read()
+            
+            # Display the HTML component
+            components.html(cesium_html, height=450, scrolling=False)
+            
+            # Instructions
+            col1, col2 = st.columns(2)
+            with col1:
+                st.info("💡 **3D Map Controls:**\n- Click and drag to rotate\n- Mouse wheel to zoom\n- Single click to select float\n- Double click to configure visualization")
+            with col2:
+                st.success("🎯 **Float Interaction:**\n- Blue markers = Active floats\n- Gray markers = Inactive floats\n- Detailed info panel appears on selection")
+        else:
+            st.error(f"Cesium map file not found at: {cesium_html_path}")
+            st.info("📝 Please ensure the cesium_map.html file exists in the components directory.")
+            st.info("💡 Switch to 2D Plotly map for full functionality.")
+            
+    except Exception as e:
+        st.error(f"Failed to load 3D map: {str(e)}")
+        st.info("� Switch to 2D Plotly map for full functionality.")
 
 def generate_synthetic_data(parameter, x_axis, y_axis):
     """Generate synthetic data when real data is not available."""
@@ -338,7 +545,9 @@ def show_parameter_dialog(float_data):
                 "xAxis": x_axis,
                 "yAxis": y_axis,
                 "latitude": float_data['latitude'],
-                "longitude": float_data['longitude']
+                "longitude": float_data['longitude'],
+                "source": "manual",
+                "session_id": st.session_state.active_session_id
             }
             
             # Store selection and close dialog
@@ -358,22 +567,67 @@ argo_floats = [
     {"id": "ARGO_005", "name": "Float 005", "latitude": 21.8, "longitude": 64.7, "status": "Active", "cycles": 39, "temperature": 24.3}
 ]
 
-# Application Header
-st.title("🌊 Argo Float Data Explorer")
-st.markdown("Interactive dashboard for exploring Argo float data in the Arabian Sea")
+# --- Query -> Visualization Config Heuristic ---
+def parse_query_to_config(query: str):
+    """Heuristically map a natural language query to a visualization config.
+    Returns a config dict or None if no reasonable mapping found."""
+    if not query:
+        return None
+    q = query.lower()
 
-# Main layout with map
-st.subheader("📍 Argo Float Map - Click on a float to configure visualization")
+    # Detect parameter
+    param_map = ["temperature", "salinity", "pressure", "oxygen"]
+    parameter = next((p for p in param_map if p in q), None) or "temperature"
 
-# Map options
-map_type = st.radio("Select Map Type:", ["2D Interactive", "3D View"], horizontal=True)
+    # Detect graph intent
+    if any(w in q for w in ["profile", "depth", "vertical"]):
+        graph_type = "profile"
+        x_axis, y_axis = "parameter", "depth"
+    elif any(w in q for w in ["time", "trend", "daily", "over time", "temporal"]):
+        graph_type = "line"
+        x_axis, y_axis = "time", "parameter"
+    elif "cycle" in q:
+        graph_type = "line"
+        x_axis, y_axis = "cycle", "parameter"
+    elif any(w in q for w in ["compare", "correl", "relation", "scatter"]):
+        graph_type = "scatter"
+        # Use parameter vs depth by default
+        x_axis, y_axis = "parameter", "depth"
+    else:
+        # Default generic line/time if unspecified
+        graph_type = "line"
+        x_axis, y_axis = "time", "parameter"
 
-# Create and display the selected map type
-if map_type == "2D Interactive":
-    # Create 2D Plotly map
+    # Detect specific float ID if mentioned
+    float_id_match = re.search(r"ARGO_\d+", query, re.IGNORECASE)
+    float_record = None
+    if float_id_match:
+        fid = float_id_match.group(0).upper()
+        float_record = next((f for f in argo_floats if f["id"] == fid), None)
+    # Fallback: currently selected marker
+    if not float_record and st.session_state.get("selected_marker"):
+        float_record = st.session_state.selected_marker
+    # Fallback: first active float else first
+    if not float_record:
+        float_record = next((f for f in argo_floats if f["status"] == "Active"), argo_floats[0])
+
+    config = {
+        "floatId": float_record["id"],
+        "floatName": float_record["name"],
+        "parameter": parameter,
+        "graphType": graph_type,
+        "xAxis": x_axis,
+        "yAxis": y_axis,
+        "latitude": float_record["latitude"],
+        "longitude": float_record["longitude"],
+        "source": "chat"
+    }
+    return config
+
+# --- Map rendering helper functions ---
+def render_2d_interactive_map(argo_floats):
+    """Render 2D interactive Plotly map centered on page; selection handled here, parameter UI elsewhere."""
     fig = go.Figure()
-    
-    # Add active floats
     active_floats = [f for f in argo_floats if f["status"] == "Active"]
     if active_floats:
         fig.add_trace(go.Scattermapbox(
@@ -385,8 +639,6 @@ if map_type == "2D Interactive":
             name="Active Floats",
             hovertemplate='<b>%{text}</b><br>Click to configure<extra></extra>'
         ))
-    
-    # Add inactive floats
     inactive_floats = [f for f in argo_floats if f["status"] == "Inactive"]
     if inactive_floats:
         fig.add_trace(go.Scattermapbox(
@@ -398,176 +650,168 @@ if map_type == "2D Interactive":
             name="Inactive Floats",
             hovertemplate='<b>%{text}</b><br>Click to configure<extra></extra>'
         ))
-    
     fig.update_layout(
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(lat=20.0, lon=66.0),
-            zoom=5
-        ),
-        height=500,
+        mapbox=dict(style="open-street-map", center=dict(lat=20.0, lon=66.0), zoom=5),
+        height=520,
         margin=dict(l=0, r=0, t=0, b=0),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    
-    # Display map with click detection
-    map_col1, map_col2 = st.columns([7, 3])
-    
-    with map_col1:
-        # Show the map with click events
-        plotly_events = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
-        
-        # Handle map marker clicks
-        if plotly_events and 'selection' in plotly_events and plotly_events['selection']['points']:
-            selected_point = plotly_events['selection']['points'][0]
-            point_index = selected_point.get('pointIndex', 0)
-            curve_number = selected_point.get('curveNumber', 0)
-            
-            # Determine which float was clicked based on curve and point index
-            if curve_number == 0 and point_index < len(active_floats):
-                selected_float = active_floats[point_index]
-            elif curve_number == 1 and point_index < len(inactive_floats):
-                selected_float = inactive_floats[point_index]
-            else:
-                selected_float = argo_floats[0]  # fallback
-            
-            st.session_state.selected_marker = selected_float
-            st.session_state.show_dialog = True
-            st.rerun()
-    
-    # Show parameter dialog in side column if a marker is selected
-    with map_col2:
-        if st.session_state.show_dialog and st.session_state.selected_marker:
-            st.markdown(f"### 🌊 Configure {st.session_state.selected_marker['name']}")
-            
-            # Close button
-            if st.button("❌ Close", key="close_dialog"):
-                st.session_state.show_dialog = False
-                st.session_state.selected_marker = None
-                st.rerun()
-            
-            # Show the parameter dialog content
-            show_parameter_dialog(st.session_state.selected_marker)
+    plotly_events = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
+    if plotly_events and 'selection' in plotly_events and plotly_events['selection']['points']:
+        selected_point = plotly_events['selection']['points'][0]
+        point_index = selected_point.get('pointIndex', 0)
+        curve_number = selected_point.get('curveNumber', 0)
+        if curve_number == 0 and point_index < len(active_floats):
+            selected_float = active_floats[point_index]
+        elif curve_number == 1 and point_index < len(inactive_floats):
+            selected_float = inactive_floats[point_index]
         else:
-            st.info("👈 Click on any marker in the map to configure visualization parameters")
-            st.markdown("""
-            **Available Parameters:**
-            - Temperature (°C)
-            - Salinity (PSU)
-            - Pressure (dbar)
-            - Oxygen (μmol/kg)
-            
-            **Visualization Types:**
-            - Depth Profiles
-            - Time Series
-            - Parameter Correlations
-            """)
+            selected_float = argo_floats[0]
+        # New marker selection: start fresh session & clear prior visualization
+        start_new_session("marker-selected")
+        st.session_state.selected_marker = selected_float
+        st.session_state.show_dialog = True
+        st.rerun()
 
-else:  # 3D View
-    # Convert to DataFrame for PyDeck
+def render_3d_pydeck_map(argo_floats):
+    """Render 3D PyDeck map and allow clicking a column / point to open parameter dialog."""
     df = pd.DataFrame(argo_floats)
-    
-    # Create color column based on status
     df["color"] = df["status"].apply(lambda s: [0, 0, 255, 200] if s == "Active" else [128, 128, 128, 160])
-    
-    # Calculate elevation based on temperature (for visual effect)
     df["elevation"] = df["temperature"] * 100
-    
-    # Create PyDeck layers
     column_layer = pdk.Layer(
-        "ColumnLayer",
-        data=df,
-        get_position=["longitude", "latitude"],
-        get_elevation="elevation",
-        elevation_scale=1,
-        radius=10000,
-        get_fill_color="color",
-        pickable=True,
-        auto_highlight=True,
-        extruded=True,
+        "ColumnLayer", data=df, get_position=["longitude", "latitude"], get_elevation="elevation", elevation_scale=1,
+        radius=10000, get_fill_color="color", pickable=True, auto_highlight=True, extruded=True,
     )
-    
     scatter_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=df,
-        get_position=["longitude", "latitude"],
-        get_color="color",
-        get_radius=7000,
-        pickable=True,
+        "ScatterplotLayer", data=df, get_position=["longitude", "latitude"], get_color="color", get_radius=7000, pickable=True,
     )
-    
-    # Create TextLayer for labels
     text_layer = pdk.Layer(
-        "TextLayer",
-        data=df,
-        get_position=["longitude", "latitude"],
-        get_text="name",
-        get_size=16,
-        get_color=[255, 255, 255, 255],
-        get_pixel_offset=[0, -20],
-        pickable=True
+        "TextLayer", data=df, get_position=["longitude", "latitude"], get_text="name", get_size=16,
+        get_color=[255, 255, 255, 255], get_pixel_offset=[0, -20], pickable=True
     )
-    
-    # Set the viewport location to Arabian Sea
-    view_state = pdk.ViewState(
-        longitude=66.0,
-        latitude=20.0,
-        zoom=5,
-        pitch=45,
-        bearing=0,
-        height=500,
-    )
-    
-    # Create the deck with multiple layers
+    view_state = pdk.ViewState(longitude=66.0, latitude=20.0, zoom=5, pitch=45, bearing=0, height=520)
     r = pdk.Deck(
         layers=[column_layer, scatter_layer, text_layer],
         initial_view_state=view_state,
         map_style="light",
-        tooltip={
-            "html": "<b>{name}</b> ({id})<br/><b>Status:</b> {status}<br/><b>Temp:</b> {temperature}°C",
-            "style": {"backgroundColor": "steelblue", "color": "white"}
-        }
+        tooltip=True,
     )
-    
-    # Display the 3D map with side panel for selection
-    map3d_col1, map3d_col2 = st.columns([7, 3])
-    
-    with map3d_col1:
-        st.pydeck_chart(r, use_container_width=True)
-        st.info("💡 **Note:** Click a float button in the panel to configure visualization")
-    
-    with map3d_col2:
-        st.markdown("### 🌊 Select Argo Float")
-        
-        # Since PyDeck doesn't have click events in Streamlit, provide buttons
-        for float_data in argo_floats:
-            status_icon = "🔵" if float_data["status"] == "Active" else "⚫"
-            if st.button(f"{status_icon} {float_data['name']}", key=f"float_{float_data['id']}"):
-                st.session_state.selected_marker = float_data
-                st.session_state.show_dialog = True
-                st.rerun()
-        
-        # Show parameter dialog if a marker is selected
-        if st.session_state.show_dialog and st.session_state.selected_marker:
-            st.markdown(f"### 🌊 Configure {st.session_state.selected_marker['name']}")
-            
-            # Close button
-            if st.button("❌ Close", key="close_3d_dialog"):
-                st.session_state.show_dialog = False
-                st.session_state.selected_marker = None
-                st.rerun()
-                
-            # Show the parameter dialog
-            show_parameter_dialog(st.session_state.selected_marker)
+    clicked = st.pydeck_chart(r, use_container_width=True)
+    # PyDeck doesn't give direct click callbacks in Streamlit; workaround: offer a selection dropdown below as fallback
+    with st.expander("Select Float (3D interaction fallback)", expanded=False):
+        choice = st.selectbox("Choose a float to configure", [f"{f['name']} ({f['id']})" for f in argo_floats], key="pydeck_select")
+        if st.button("Configure Selected Float", key="pydeck_select_btn"):
+            idx = [f"{f['name']} ({f['id']})" for f in argo_floats].index(choice)
+            start_new_session("marker-selected-3d")
+            st.session_state.selected_marker = argo_floats[idx]
+            st.session_state.show_dialog = True
+            st.rerun()
 
-# Visualization section - Appears below the map
+# Application Header
+st.title("🌊 Argo Float Data Explorer")
+st.markdown("Interactive dashboard for exploring Argo float data in the Arabian Sea")
+
+# Initialize collapse state
+if "copilot_open" not in st.session_state:
+    st.session_state.copilot_open = True
+
+top_bar_cols = st.columns([0.15, 0.85])
+with top_bar_cols[0]:
+    toggle_label = "🔒 Hide FloatChat" if st.session_state.copilot_open else "💬 Show FloatChat"
+    if st.button(toggle_label, key="toggle_copilot"):
+        st.session_state.copilot_open = not st.session_state.copilot_open
+        st.rerun()
+with top_bar_cols[1]:
+    st.write("")
+
+if st.session_state.copilot_open:
+    # When copilot is open allocate space for future expansion (empty param column placeholder)
+    map_col, chat_col = st.columns([3.5, 1.5])
+else:
+    map_col = st.container()
+    chat_col = None
+
+with map_col:
+    st.subheader("🗺️ Argo Float Map")
+    map_type = st.radio("Map Type", ["2D Interactive", "3D PyDeck", "3D Cesium"], horizontal=True, key="map_type_radio")
+    if map_type == "2D Interactive":
+        render_2d_interactive_map(argo_floats)
+    elif map_type == "3D PyDeck":
+        render_3d_pydeck_map(argo_floats)
+    else:
+        create_3d_cesium_map()
+
+# Parameter section appears only when a marker is selected (no placeholder otherwise)
+if st.session_state.show_dialog and st.session_state.selected_marker:
+    st.subheader("🎯 Configure Visualization Parameters")
+    show_parameter_dialog(st.session_state.selected_marker)
+
+if chat_col is not None:
+    with chat_col:
+        # Full-height sticky styled container
+        st.markdown(
+            """
+            <style>
+            .copilot-wrapper {position: sticky; top: 0; max-height: 100vh; overflow-y: auto; padding-right:6px;}
+            .copilot-section-title {margin-top:0.2rem;}
+            .copilot-queries button {width:100%; text-align:left;}
+            .chat-messages {border:1px solid #e5e5e5; border-radius:8px; padding:0.5rem; background:#fafafa; max-height:48vh; overflow-y:auto;}
+            .chat-messages::-webkit-scrollbar {width:8px;} .chat-messages::-webkit-scrollbar-track {background:transparent;} .chat-messages::-webkit-scrollbar-thumb {background:#c1c1c1; border-radius:4px;}
+            </style>
+            <div class='copilot-wrapper'>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.header("🧭 FloatChat", anchor=False)
+        st.markdown("<h4 class='copilot-section-title'>🔍 Quick Queries</h4>", unsafe_allow_html=True)
+        sample_queries = get_sample_queries()
+        for i, query in enumerate(sample_queries):
+            if st.button(query, key=f"sample_{i}"):
+                # New query -> start new session, clear prior vis
+                start_new_session("sample-query")
+                st.session_state.messages.append({"role": "user", "content": query})
+                response = simulate_query(query)
+                st.session_state.messages.append({"role": "assistant", "content": response["response"]})
+                cfg = parse_query_to_config(query)
+                if cfg:
+                    cfg["query"] = query
+                    cfg["session_id"] = st.session_state.active_session_id
+                    st.session_state.map_selection = cfg
+                st.rerun()
+        st.markdown("---")
+        st.markdown("<h4 class='copilot-section-title'>💬 Chat</h4>", unsafe_allow_html=True)
+        chat_container_html = st.container()
+        with chat_container_html:
+            st.markdown("<div class='chat-messages'>", unsafe_allow_html=True)
+            for message in st.session_state.messages[-80:]:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            st.markdown("</div>", unsafe_allow_html=True)
+        prompt = st.chat_input("Ask or request a visualization...", key="chat_prompt")
+        if prompt:
+            # New free-form query starts new session
+            start_new_session("chat-query")
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking & charting..."):
+                    response = simulate_query(prompt)
+                    st.markdown(response["response"])
+                    st.session_state.messages.append({"role": "assistant", "content": response["response"]})
+                    cfg = parse_query_to_config(prompt)
+                    if cfg:
+                        cfg["query"] = prompt
+                        cfg["session_id"] = st.session_state.active_session_id
+                        st.session_state.map_selection = cfg
+                        st.session_state.show_dialog = False
+                        st.session_state.selected_marker = None
+            st.rerun()
+        st.caption("Panel scrolls independently. Collapse for a wider canvas.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
 st.markdown("---")
+st.subheader("📊 Visualizations & Outputs")
 
 # Check if there's a graph to display
 if st.session_state.map_selection is not None:
@@ -585,28 +829,32 @@ if st.session_state.map_selection is not None:
     # Show the plot if available
     if resp.get("plot"):
         p = resp.get("plot")
-        fig = go.Figure()
-        
-        graph_type = p.get("graph_type", "line")
-        if graph_type == "scatter":
-            fig.add_trace(go.Scatter(x=p.get("x"), y=p.get("y"), mode="markers", marker=dict(size=8)))
-        elif graph_type == "profile":
-            fig.add_trace(go.Scatter(x=p.get("x"), y=p.get("y"), mode="lines+markers", line=dict(width=3)))
-        else:  # line plot
-            fig.add_trace(go.Scatter(x=p.get("x"), y=p.get("y"), mode="lines+markers"))
-        
-        if p.get("reverse_y"):
-            fig.update_yaxes(autorange="reversed")
-        
-        fig.update_xaxes(title=p.get("x_label"))
-        fig.update_yaxes(title=p.get("y_label"))
+        if p and isinstance(p, dict):
+            fig = go.Figure()
+            
+            graph_type = p.get("graph_type", "line")
+            if graph_type == "scatter":
+                fig.add_trace(go.Scatter(x=p.get("x", []), y=p.get("y", []), mode="markers", marker=dict(size=8)))
+            elif graph_type == "profile":
+                fig.add_trace(go.Scatter(x=p.get("x", []), y=p.get("y", []), mode="lines+markers", line=dict(width=3)))
+            else:  # line plot
+                fig.add_trace(go.Scatter(x=p.get("x", []), y=p.get("y", []), mode="lines+markers"))
+            
+            if p.get("reverse_y"):
+                fig.update_yaxes(autorange="reversed")
+            
+            fig.update_xaxes(title=p.get("x_label", "X-Axis"))
+            fig.update_yaxes(title=p.get("y_label", "Y-Axis"))
         fig.update_layout(
             title=f"Argo Float Data Visualization ({graph_type.title()} Plot)",
             height=500
         )
         
         st.plotly_chart(fig, use_container_width=True)
-        
+        # Commit this visualization to session history (once)
+        config.setdefault("session_id", st.session_state.active_session_id)
+        commit_visualization(config, resp)
+
         # Download options
         col1, col2 = st.columns(2)
         with col1:
@@ -617,17 +865,25 @@ if st.session_state.map_selection is not None:
                 mime="application/json"
             )
         with col2:
-            st.download_button(
-                "📥 Download Plot Data (CSV)", 
-                data=pd.DataFrame({
-                    p.get("x_label", "x"): p.get("x", []),
-                    p.get("y_label", "y"): p.get("y", [])
-                }).to_csv(index=False), 
-                file_name=f"argo_{config.get('floatId', 'data')}_{config.get('parameter', 'param')}.csv", 
-                mime="text/csv"
-            )
+            if p and isinstance(p, dict):
+                st.download_button(
+                    "📥 Download Plot Data (CSV)", 
+                    data=pd.DataFrame({
+                        p.get("x_label", "x"): p.get("x", []),
+                        p.get("y_label", "y"): p.get("y", [])
+                    }).to_csv(index=False), 
+                    file_name=f"argo_{config.get('floatId', 'data')}_{config.get('parameter', 'param')}.csv", 
+                    mime="text/csv"
+                )
 else:
-    st.info("👆 Select a float from the map above to generate visualizations")
+    pass  # No placeholder message; map itself is interactive
+
+# Session history panel
+if st.session_state.get("sessions"):
+    with st.expander("📚 Session History", expanded=False):
+        for s in reversed(st.session_state.sessions[-20:]):
+            cfg = s["config"]
+            st.markdown(f"**Session {s['id']}** · {s['timestamp']} · {cfg.get('parameter','?')} {cfg.get('graphType','?')} ({cfg.get('xAxis')} vs {cfg.get('yAxis')}) · Source: {cfg.get('source','?')}" )
 
 # Footer
 st.markdown("---")
