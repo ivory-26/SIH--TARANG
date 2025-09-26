@@ -15,10 +15,20 @@ BASE_DIR = os.path.dirname(__file__)
 SAMPLE_PATH = os.path.join(BASE_DIR, "static", "sample_data.json")
 CESIUM_MAP_PATH = os.path.join(BASE_DIR, "components", "cesium_map.html")
 
+# Try load SVG icon for header embellishment and strip XML prolog (prevents raw code rendering)
+APP_ICON_SVG = ""
+try:
+    with open(os.path.join(BASE_DIR, "static", "app_icon.svg"), "r", encoding="utf-8") as _svgf:
+        _raw_svg = _svgf.read()
+        # Remove XML declaration if present
+        APP_ICON_SVG = re.sub(r"<\?xml[^>]*?>", "", _raw_svg).strip()
+except Exception:
+    APP_ICON_SVG = ""
+
 # Set page config
 st.set_page_config(
     page_title="Argo Float Dashboard",
-    page_icon="🌊",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -122,7 +132,7 @@ if st.session_state.get("clear_after_commit"):
 
 # Sidebar session navigation (left side bar)
 with st.sidebar:
-    st.header("🗂️ Sessions")
+    st.header("Sessions")
     if st.session_state.sessions:
         for s in reversed(st.session_state.sessions[-50:]):
             cfg = s["config"]
@@ -176,114 +186,39 @@ if st.session_state.get("view_session_id"):
     st.stop()
 
 
-# Custom CSS for the app
+# Polished UI styles (reduced emoji reliance)
 st.markdown("""
 <style>
-.stApp {
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-.float-card {
-    background: white;
-    border-radius: 10px;
-    padding: 15px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    margin: 10px 0;
-}
-
-.side-dialog {
-    position: absolute;
-    right: 20px;
-    width: 350px;
-    z-index: 1000;
-    background: white;
-    border-radius: 10px;
-    padding: 15px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-    border: 2px solid #4a90e2;
-}
-
-.graph-container {
-    margin-top: 20px;
-    padding: 20px;
-    border-radius: 10px;
-    background: rgba(240, 242, 246, 0.8);
-}
-
-/* Parameter dialog styling */
-.dialog-container {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 15px;
-    padding: 20px;
-    margin: 10px 0;
-    box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    max-width: 500px;
-}
-
-.dialog-header {
-    color: white;
-    text-align: center;
-    font-size: 1.5rem;
-    font-weight: bold;
-    margin-bottom: 15px;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-}
-
-.float-info-card {
-    background: rgba(255, 255, 255, 0.9);
-    border-radius: 10px;
-    padding: 15px;
-    margin: 10px 0;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.info-row {
-    display: flex;
-    justify-content: space-between;
-    margin: 5px 0;
-    padding: 5px;
-    border-bottom: 1px solid #eee;
-}
-
-.info-label {
-    font-weight: bold;
-    color: #333;
-}
-
-.info-value {
-    color: #666;
-}
-/* Dark theme cleanup: eliminate white bars in parameter form & chat */
-div[data-testid="stForm"],
-div[data-testid="stForm"] > div,
-div[data-testid="stForm"] form,
-div[data-testid="stForm"] form > div {background: transparent !important; box-shadow:none !important; border:none !important;}
-
-/* Inputs/selects inside forms */
-div[data-testid="stForm"] div[data-baseweb],
-div[data-baseweb="select"] > div,
-div[data-baseweb="input"] > div {background:#1a1d21 !important; color:#e5e7eb !important; border:1px solid #2a2f36 !important;}
-
-/* Float info card restyle (remove white slab) */
-.float-info-card {background:rgba(30,32,36,0.85) !important; border:1px solid #2f343a !important; color:#e5e7eb !important;}
-.float-info-card .info-label {color:#9ca3af !important;}
-.float-info-card .info-value {color:#f3f4f6 !important;}
-
-/* Chat input area */
-div[data-testid="stChatInput"],
-div[data-testid="stChatInput"] > div {background:transparent !important; box-shadow:none !important; border:none !important;}
-div[data-testid="stChatInput"] textarea {background:#111418 !important; color:#f3f4f6 !important; border:1px solid #2a2f36 !important;}
-div[data-testid="stChatInput"] button {background:#2563eb !important; color:#fff !important; border:1px solid #1d4ed8 !important;}
-
-/* Remove stray full-width white blocks sometimes produced by blank markdown */
-div.block-container > div:has(> hr),
-div.block-container > div:empty {background:transparent !important;}
-
-/* Ensure map + parameter area unified */
-section.main > div {background:transparent !important;}
+.stApp {max-width:1500px; margin:0 auto; font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,'Open Sans','Helvetica Neue',sans-serif;}
+h1,h2,h3,h4 {font-weight:600; letter-spacing:.4px;}
+h1 {font-size:2.15rem;}
+h2 {font-size:1.55rem; margin-top:1.8rem;}
+h3 {font-size:1.25rem; margin-top:1.4rem;}
+p,.stMarkdown {line-height:1.48;}
+.float-info-card {background:linear-gradient(145deg,#1e2530,#15202b)!important; border:1px solid #243441!important; border-radius:14px; padding:14px 18px; backdrop-filter:blur(4px); transition:border-color .25s ease, transform .25s ease;}
+.float-info-card:hover {border-color:#3b82f6; transform:translateY(-2px);} 
+.info-row {display:flex; justify-content:space-between; padding:6px 4px; border-bottom:1px solid #243241; font-size:.82rem;}
+.info-row:last-of-type {border-bottom:none;}
+.info-label {color:#94a3b8; font-weight:500;}
+.info-value {color:#f1f5f9; font-weight:500; letter-spacing:.3px;}
+div[data-testid="stForm"] {background:rgba(17,25,36,0.65)!important; border:1px solid #22303d; border-radius:16px; padding:1.2rem 1.2rem .85rem!important; box-shadow:0 4px 22px -4px rgba(0,0,0,.35);} 
+div[data-testid="stForm"] label {font-size:.78rem; text-transform:uppercase; letter-spacing:.6px; font-weight:600; color:#e2e8f0 !important;}
+div[data-testid="stForm"] div[data-baseweb] {background:#0f1720!important; border-radius:10px; border:1px solid #283847;}
+div[data-testid="stForm"] div[data-baseweb]:focus-within {outline:2px solid #3b82f6;}
+button[kind="primary"], .stButton > button {transition:background .25s, transform .18s, box-shadow .25s; font-weight:600; letter-spacing:.4px; border-radius:10px !important;}
+.stButton > button:hover {transform:translateY(-2px); box-shadow:0 8px 18px -6px rgba(0,0,0,.45);} 
+.stButton > button:active {transform:translateY(0);}
+.copilot-wrapper {background:transparent; border:0; border-radius:16px; padding:4px 2px 12px;} 
+.chat-messages {background:rgba(15,23,32,0.55)!important; border:1px solid #243240!important; border-radius:12px;}
+.chat-messages .stMarkdown {font-size:.82rem;}
+div[data-testid="stChatInput"] textarea {font-size:.85rem !important;}
+hr, div.block-container > div:has(> hr) {border-color:#20303d !important;}
+.stDownloadButton > button {border-radius:10px !important; font-size:.78rem; text-transform:uppercase; letter-spacing:.9px; font-weight:600;}
+.app-title-wrapper {display:flex; align-items:center; gap:.9rem; margin-bottom:.35rem;}
+.app-title-wrapper svg, .app-title-wrapper img.app-icon {width:64px; height:64px; border-radius:14px; box-shadow:0 6px 16px -4px rgba(0,0,0,.55);} 
+@media (max-width:850px){ .app-title-wrapper svg, .app-title-wrapper img.app-icon {width:48px; height:48px;} h1 {font-size:1.85rem;} }
+.subtitle {margin-top:.15rem; color:#94a3b8; font-size:.92rem;}
+@media (max-width:1100px){ .copilot-wrapper {position:relative;} }
 </style>
 """, unsafe_allow_html=True)
 
@@ -322,7 +257,7 @@ def get_axis_label(axis, parameter=None):
 
 def create_3d_cesium_map():
     """Create a 3D Cesium map with Argo floats.""" 
-    st.subheader("🌍 3D Cesium Interactive Map")
+    st.subheader("3D Cesium Interactive Map")
     
     # Display the Cesium map using HTML component
     cesium_html_path = os.path.join(BASE_DIR, "components", "cesium_map.html")
@@ -338,17 +273,17 @@ def create_3d_cesium_map():
             # Instructions
             col1, col2 = st.columns(2)
             with col1:
-                st.info("💡 **3D Map Controls:**\n- Click and drag to rotate\n- Mouse wheel to zoom\n- Single click to select float\n- Double click to configure visualization")
+                st.info("**3D Map Controls:**\n- Click and drag to rotate\n- Mouse wheel to zoom\n- Single click to select float\n- Double click to configure visualization")
             with col2:
-                st.success("🎯 **Float Interaction:**\n- Blue markers = Active floats\n- Gray markers = Inactive floats\n- Detailed info panel appears on selection")
+                st.success("**Float Interaction:**\n- Blue markers = Active floats\n- Gray markers = Inactive floats\n- Detailed info panel appears on selection")
         else:
             st.error(f"Cesium map file not found at: {cesium_html_path}")
-            st.info("📝 Please ensure the cesium_map.html file exists in the components directory.")
-            st.info("💡 Switch to 2D Plotly map for full functionality.")
+            st.info("Please ensure the cesium_map.html file exists in the components directory.")
+            st.info("Tip: Switch to 2D Plotly map for full functionality.")
             
     except Exception as e:
         st.error(f"Failed to load 3D map: {str(e)}")
-        st.info("� Switch to 2D Plotly map for full functionality.")
+        st.info("Switch to 2D Plotly map for full functionality.")
 
 def generate_synthetic_data(parameter, x_axis, y_axis):
     """Generate synthetic data when real data is not available."""
@@ -472,23 +407,23 @@ def show_parameter_dialog(float_data):
     st.markdown('<div class="float-info-card">', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="info-row">
-        <span class="info-label">🎯 Float Name:</span>
+        <span class="info-label">Name</span>
         <span class="info-value">{float_data['name']}</span>
     </div>
     <div class="info-row">
-        <span class="info-label">🆔 Float ID:</span>
+        <span class="info-label">ID</span>
         <span class="info-value">{float_data['id']}</span>
     </div>
     <div class="info-row">
-        <span class="info-label">📍 Location:</span>
+        <span class="info-label">Location</span>
         <span class="info-value">{float_data['latitude']:.3f}°N, {float_data['longitude']:.3f}°E</span>
     </div>
     <div class="info-row">
-        <span class="info-label">🌡️ Temperature:</span>
+        <span class="info-label">Temperature</span>
         <span class="info-value">{float_data['temperature']}°C</span>
     </div>
     <div class="info-row">
-        <span class="info-label">📊 Status:</span>
+        <span class="info-label">Status</span>
         <span class="info-value">{float_data['status']}</span>
     </div>
     """, unsafe_allow_html=True)
@@ -496,13 +431,13 @@ def show_parameter_dialog(float_data):
 
     # Parameter selection form
     with st.form("parameter_form", clear_on_submit=False):
-        st.markdown("### 📊 Visualization Parameters")
+        st.markdown("### Visualization Parameters")
         
         col1, col2 = st.columns(2)
         
         with col1:
             parameter = st.selectbox(
-                "🌊 Parameter:",
+                "Parameter",
                 ["temperature", "salinity", "pressure", "oxygen"],
                 help="Choose the oceanographic parameter to visualize",
                 format_func=lambda x: f"{x.title()} ({get_parameter_unit(x)})"
@@ -510,7 +445,7 @@ def show_parameter_dialog(float_data):
         
         with col2:
             graph_type = st.selectbox(
-                "📈 Graph Type:",
+                "Graph Type:",
                 ["profile", "line", "scatter"],
                 help="Select the visualization style",
                 format_func=lambda x: f"🌊 Depth Profile" if x == "profile" else f"📈 Line Plot" if x == "line" else f"⚪ Scatter Plot"
@@ -519,22 +454,18 @@ def show_parameter_dialog(float_data):
         col3, col4 = st.columns(2)
         with col3:
             if graph_type == "profile":
-                x_axis = st.selectbox("📐 X-Axis:", ["parameter"], disabled=True, help="Fixed for depth profiles")
+                x_axis = st.selectbox("X-Axis:", ["parameter"], disabled=True, help="Fixed for depth profiles")
             else:
-                x_axis = st.selectbox("📐 X-Axis:", ["time", "depth", "cycle", "parameter"])
+                x_axis = st.selectbox("X-Axis:", ["time", "depth", "cycle", "parameter"])
         
         with col4:
             if graph_type == "profile":
-                y_axis = st.selectbox("📏 Y-Axis:", ["depth"], disabled=True, help="Fixed for depth profiles")
+                y_axis = st.selectbox("Y-Axis:", ["depth"], disabled=True, help="Fixed for depth profiles")
             else:
-                y_axis = st.selectbox("📏 Y-Axis:", ["parameter", "depth", "time", "cycle"])
+                y_axis = st.selectbox("Y-Axis:", ["parameter", "depth", "time", "cycle"])
         
         # Submit button with enhanced styling
-        submitted = st.form_submit_button(
-            "🎨 Generate Visualization", 
-            type="primary", 
-            use_container_width=True
-        )
+        submitted = st.form_submit_button("Generate Visualization", type="primary", use_container_width=True)
         
         if submitted:
             config = {
@@ -554,7 +485,7 @@ def show_parameter_dialog(float_data):
             st.session_state.map_selection = config
             st.session_state.show_dialog = False
             st.session_state.selected_marker = None
-            st.success(f"🎯 Generating {parameter} {graph_type} for {float_data['name']}...")
+            st.success(f"Generating {parameter} {graph_type} for {float_data['name']}...")
             time.sleep(0.5)  # Brief pause for user feedback
             st.rerun()
 
@@ -707,22 +638,42 @@ def render_3d_pydeck_map(argo_floats):
             st.session_state.show_dialog = True
             st.rerun()
 
-# Application Header
-st.title("🌊 Argo Float Data Explorer")
-st.markdown("Interactive dashboard for exploring Argo float data in the Arabian Sea")
+# --- Application Header (resilient icon handling) ---
+# If user added a PNG (e.g. static/app_icon.png), prefer that; else use inline SVG if loaded; else just text.
+png_icon_path = os.path.join(BASE_DIR, "static", "app_icon.png")
+icon_markup = ""
+if os.path.exists(png_icon_path):
+    # Use base64 to embed so it survives reruns and remote hosting
+    import base64
+    try:
+        with open(png_icon_path, "rb") as _pf:
+            b64png = base64.b64encode(_pf.read()).decode("utf-8")
+        icon_markup = f"<img class='app-icon' src='data:image/png;base64,{b64png}' alt='App Icon' />"
+    except Exception:
+        icon_markup = ""
+elif APP_ICON_SVG:
+    # Sanitize width/height inline if missing
+    svg_tag = APP_ICON_SVG
+    if '<svg' in svg_tag and 'width' not in svg_tag:
+        svg_tag = svg_tag.replace('<svg', '<svg width="48" height="48"')
+    icon_markup = svg_tag
+
+st.markdown(
+    f"""
+    <div class='app-title-wrapper'>
+        {icon_markup}
+        <div>
+            <h1 style='margin-bottom:0.25rem;'>FloatChat</h1>
+            <div class='subtitle'>Interactive dashboard for exploring Argo float observations in the Arabian Sea</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # Initialize collapse state
 if "copilot_open" not in st.session_state:
     st.session_state.copilot_open = True
-
-top_bar_cols = st.columns([0.15, 0.85])
-with top_bar_cols[0]:
-    toggle_label = "🔒 Hide FloatChat" if st.session_state.copilot_open else "💬 Show FloatChat"
-    if st.button(toggle_label, key="toggle_copilot"):
-        st.session_state.copilot_open = not st.session_state.copilot_open
-        st.rerun()
-with top_bar_cols[1]:
-    st.write("")
 
 if st.session_state.copilot_open:
     # When copilot is open allocate space for future expansion (empty param column placeholder)
@@ -732,8 +683,17 @@ else:
     chat_col = None
 
 with map_col:
-    st.subheader("🗺️ Argo Float Map")
-    map_type = st.radio("Map Type", ["2D Interactive", "3D PyDeck", "3D Cesium"], horizontal=True, key="map_type_radio")
+    header_cols = st.columns([0.8, 0.2])
+    with header_cols[0]:
+        st.subheader("Argo Float Map")
+    with header_cols[1]:
+        toggle_label = "Hide Chat" if st.session_state.copilot_open else "Show Chat"
+        st.markdown("<div style='display:flex; justify-content:flex-end; align-items:center; margin-top:4px;'>", unsafe_allow_html=True)
+        if st.button(toggle_label, key="toggle_copilot"):
+            st.session_state.copilot_open = not st.session_state.copilot_open
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    map_type = st.radio("Map Type", ["2D Interactive", "3D", "3D World Map"], horizontal=True, key="map_type_radio")
     if map_type == "2D Interactive":
         render_2d_interactive_map(argo_floats)
     elif map_type == "3D PyDeck":
@@ -743,7 +703,7 @@ with map_col:
 
 # Parameter section appears only when a marker is selected (no placeholder otherwise)
 if st.session_state.show_dialog and st.session_state.selected_marker:
-    st.subheader("🎯 Configure Visualization Parameters")
+    st.subheader("Configure Visualization Parameters")
     show_parameter_dialog(st.session_state.selected_marker)
 
 if chat_col is not None:
@@ -762,12 +722,11 @@ if chat_col is not None:
             """,
             unsafe_allow_html=True,
         )
-        st.header("🧭 FloatChat", anchor=False)
-        st.markdown("<h4 class='copilot-section-title'>🔍 Quick Queries</h4>", unsafe_allow_html=True)
+        st.header("Assistant", anchor=False)
+        st.markdown("<h4 class='copilot-section-title'>Quick Queries</h4>", unsafe_allow_html=True)
         sample_queries = get_sample_queries()
         for i, query in enumerate(sample_queries):
             if st.button(query, key=f"sample_{i}"):
-                # New query -> start new session, clear prior vis
                 start_new_session("sample-query")
                 st.session_state.messages.append({"role": "user", "content": query})
                 response = simulate_query(query)
@@ -779,7 +738,7 @@ if chat_col is not None:
                     st.session_state.map_selection = cfg
                 st.rerun()
         st.markdown("---")
-        st.markdown("<h4 class='copilot-section-title'>💬 Chat</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 class='copilot-section-title'>Chat</h4>", unsafe_allow_html=True)
         chat_container_html = st.container()
         with chat_container_html:
             st.markdown("<div class='chat-messages'>", unsafe_allow_html=True)
@@ -789,7 +748,6 @@ if chat_col is not None:
             st.markdown("</div>", unsafe_allow_html=True)
         prompt = st.chat_input("Ask or request a visualization...", key="chat_prompt")
         if prompt:
-            # New free-form query starts new session
             start_new_session("chat-query")
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
@@ -811,7 +769,7 @@ if chat_col is not None:
         st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("---")
-st.subheader("📊 Visualizations & Outputs")
+st.subheader("Visualizations & Outputs")
 
 # Check if there's a graph to display
 if st.session_state.map_selection is not None:
@@ -821,7 +779,7 @@ if st.session_state.map_selection is not None:
     resp = generate_argo_graph(config)
     
     # Display visualization header
-    st.header(f"📊 Visualization: {config.get('parameter', '').title()} {config.get('graphType', '').title()} - {config.get('floatName', '')}")
+    st.header(f"Visualization: {config.get('parameter', '').title()} {config.get('graphType', '').title()} - {config.get('floatName', '')}")
     
     # Display graph configuration
     st.markdown(f"**Configuration:** {config.get('parameter', '')} - {config.get('graphType', '')} ({config.get('xAxis', '')} vs {config.get('yAxis', '')})")
@@ -859,7 +817,7 @@ if st.session_state.map_selection is not None:
         col1, col2 = st.columns(2)
         with col1:
             st.download_button(
-                "📥 Download Data (JSON)", 
+                "Download Data (JSON)", 
                 data=json.dumps(resp.get("data", {}), indent=2), 
                 file_name=f"argo_{config.get('floatId', 'data')}_{config.get('parameter', 'param')}.json", 
                 mime="application/json"
@@ -867,7 +825,7 @@ if st.session_state.map_selection is not None:
         with col2:
             if p and isinstance(p, dict):
                 st.download_button(
-                    "📥 Download Plot Data (CSV)", 
+                    "Download Plot Data (CSV)", 
                     data=pd.DataFrame({
                         p.get("x_label", "x"): p.get("x", []),
                         p.get("y_label", "y"): p.get("y", [])
@@ -880,7 +838,7 @@ else:
 
 # Session history panel
 if st.session_state.get("sessions"):
-    with st.expander("📚 Session History", expanded=False):
+    with st.expander("Session History", expanded=False):
         for s in reversed(st.session_state.sessions[-20:]):
             cfg = s["config"]
             st.markdown(f"**Session {s['id']}** · {s['timestamp']} · {cfg.get('parameter','?')} {cfg.get('graphType','?')} ({cfg.get('xAxis')} vs {cfg.get('yAxis')}) · Source: {cfg.get('source','?')}" )
