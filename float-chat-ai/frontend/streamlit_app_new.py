@@ -10,6 +10,11 @@ import os
 from datetime import datetime
 import re
 
+try:
+    from streamlit_plotly_events import plotly_events as plotly_capture_events
+except ImportError:  # pragma: no cover - optional dependency
+    plotly_capture_events = None
+
 # Base directory and file paths
 BASE_DIR = os.path.dirname(__file__)
 SAMPLE_PATH = os.path.join(BASE_DIR, "static", "sample_data.json")
@@ -89,6 +94,22 @@ if "active_session_id" not in st.session_state:
     st.session_state.active_session_id = str(int(time.time()*1000))
 if "_committed_session_ids" not in st.session_state:
     st.session_state._committed_session_ids = set()
+if "chat_sessions" not in st.session_state:
+    # Stores archived chat transcripts when user clicks "New Chat"
+    # [{id, timestamp, messages:[{role, content}, ...]}]
+    st.session_state.chat_sessions = []
+
+# --- Chat Helpers ---
+def archive_current_chat():
+    """Archive current chat messages (if any) into chat_sessions then clear chat box."""
+    if st.session_state.get("messages"):
+        st.session_state.chat_sessions.append({
+            "id": str(int(time.time()*1000)),
+            "timestamp": datetime.utcnow().isoformat(),
+            "messages": list(st.session_state.messages)  # shallow copy
+        })
+    st.session_state.messages = []
+
 
 # --- Session Lifecycle Helpers ---
 def start_new_session(reason: str = "user-action"):
@@ -292,13 +313,13 @@ def generate_synthetic_data(parameter, x_axis, y_axis):
     if x_axis == "depth" or y_axis == "depth":
         depths = np.linspace(0, 2000, 20)
         if parameter == "temperature":
-            values = 25 * np.exp(-depths/500) + 2 + np.random.normal(0, 0.5, len(depths))
+            values = 25 * np.exp(-np.divide(depths, 500.0)) + 2 + np.random.normal(0, 0.5, len(depths))
         elif parameter == "salinity":
-            values = 35.0 - 0.6 * (depths/2000) + np.random.normal(0, 0.1, len(depths))
+            values = 35.0 - 0.6 * np.divide(depths, 2000.0) + np.random.normal(0, 0.1, len(depths))
         elif parameter == "pressure":
             values = depths * 0.98 + np.random.normal(0, 5, len(depths))
         else:  # oxygen
-            values = 300 * np.exp(-depths/200) + 50 + np.random.normal(0, 5, len(depths))
+            values = 300 * np.exp(-np.divide(depths, 200.0)) + 50 + np.random.normal(0, 5, len(depths))
             
         # For profile, x is parameter, y is depth
         if x_axis == "parameter" and y_axis == "depth":
@@ -353,39 +374,104 @@ def generate_argo_graph(config):
     graph_type = config.get("graphType")
     x_axis = config.get("xAxis")
     y_axis = config.get("yAxis")
-    
-    # Get data from sample data
-    # In a real app, this would fetch from an API or database
-    
-    # Placeholder for parameter data
-    param_data = {}
-    
-    # Determine data source based on axes
-    data_source = None
-    if x_axis == "time" or y_axis == "time":
-        data_source = param_data.get("time_series")
-    elif x_axis == "depth" or y_axis == "depth":
-        data_source = param_data.get("depth_profile")
-    elif x_axis == "cycle" or y_axis == "cycle":
-        data_source = param_data.get("cycle_data")
-    else:
-        data_source = param_data.get("depth_profile")  # default
-    
-    if not data_source:
-        # Generate synthetic data
-        data_source = generate_synthetic_data(parameter, x_axis, y_axis)
-    
-    # Prepare plot data
+
+    # Fetch curated sample data for the selected float/parameter (if available)
+    argo_dataset = SAMPLE.get("argo_data", {})
+    float_payload = argo_dataset.get(float_id) or argo_dataset.get(config.get("floatName", ""), {})
+    param_data = float_payload.get(parameter, {}) if isinstance(float_payload, dict) else {}
+
+    def _prepare_from_series(series: dict | None, series_type: str):
+        if not series:
+            return None
+        series = dict(series)
+
+        if series_type == "time_series":
+            raw_times = series.get("x", [])
+            try:
+                times = [pd.to_datetime(t).to_pydatetime() for t in raw_times]
+            except Exception:
+                times = raw_times
+            values = series.get("y", [])
+            depths = series.get("depths")
+
+            if x_axis == "time" and y_axis == "parameter":
+                return {"x": times, "y": values}
+            if x_axis == "time" and y_axis == "depth" and depths:
+                return {"x": times, "y": depths}
+            if x_axis == "parameter" and y_axis == "time":
+                return {"x": values, "y": times}
+            if x_axis == "depth" and y_axis == "time" and depths:
+                return {"x": depths, "y": times}
+            if x_axis == "time":
+                return {"x": times, "y": values}
+            if y_axis == "time":
+                return {"x": values, "y": times}
+
+        if series_type == "cycle_data":
+            cycles = series.get("x", [])
+            values = series.get("y", [])
+            if x_axis == "cycle" and y_axis == "parameter":
+                return {"x": cycles, "y": values}
+            if x_axis == "parameter" and y_axis == "cycle":
+                return {"x": values, "y": cycles}
+            if x_axis == "cycle":
+                return {"x": cycles, "y": values}
+            if y_axis == "cycle":
+                return {"x": values, "y": cycles}
+
+        if series_type == "depth_profile":
+            parameter_vals = series.get("x", [])
+            depths = series.get("y", [])
+            if x_axis == "parameter" and y_axis == "depth":
+                return {"x": parameter_vals, "y": depths}
+            if x_axis == "depth" and y_axis == "parameter":
+                return {"x": depths, "y": parameter_vals}
+            if x_axis == "depth":
+                return {"x": depths, "y": parameter_vals}
+            if y_axis == "depth":
+                return {"x": parameter_vals, "y": depths}
+
+        # Default orientation if specific mapping not handled above
+        return {"x": series.get("x", []), "y": series.get("y", [])}
+
+    prepared_data = None
+    data_source_key = None
+
+    if graph_type == "profile":
+        prepared_data = _prepare_from_series(param_data.get("depth_profile"), "depth_profile")
+        data_source_key = "depth_profile" if prepared_data else None
+    if not prepared_data and (x_axis == "time" or y_axis == "time"):
+        prepared_data = _prepare_from_series(param_data.get("time_series"), "time_series")
+        data_source_key = "time_series" if prepared_data else data_source_key
+    if not prepared_data and (x_axis == "cycle" or y_axis == "cycle"):
+        prepared_data = _prepare_from_series(param_data.get("cycle_data"), "cycle_data")
+        data_source_key = "cycle_data" if prepared_data else data_source_key
+    if not prepared_data and (x_axis == "depth" or y_axis == "depth" or graph_type == "profile"):
+        prepared_data = _prepare_from_series(param_data.get("depth_profile"), "depth_profile")
+        data_source_key = "depth_profile" if prepared_data else data_source_key
+    if not prepared_data:
+        prepared_data = _prepare_from_series(param_data.get("time_series"), "time_series")
+        data_source_key = "time_series" if prepared_data else data_source_key
+
+    data_origin = "static"
+    if not prepared_data or not prepared_data.get("x"):
+        prepared_data = generate_synthetic_data(parameter, x_axis, y_axis)
+        data_origin = "synthetic"
+
     plot_data = {
-        "x": data_source.get("x", []),
-        "y": data_source.get("y", []),
+        "x": prepared_data.get("x", []),
+        "y": prepared_data.get("y", []),
         "x_label": get_axis_label(x_axis, parameter),
         "y_label": get_axis_label(y_axis, parameter),
         "reverse_y": y_axis == "depth",
         "graph_type": graph_type
     }
-    
-    response_text = f"Generated {graph_type} visualization for {parameter} from {config.get('floatName', float_id)} (Position: {config.get('latitude', 0):.2f}°N, {config.get('longitude', 0):.2f}°E)"
+
+    source_phrase = "curated sample" if data_origin == "static" else "synthetic"
+    response_text = (
+        f"Generated {graph_type} visualization for {parameter} from {config.get('floatName', float_id)} "
+        f"(Position: {config.get('latitude', 0):.2f}°N, {config.get('longitude', 0):.2f}°E) using {source_phrase} data."
+    )
     
     return {
         "text": response_text,
@@ -395,7 +481,9 @@ def generate_argo_graph(config):
             "graph_type": graph_type,
             "x_axis": x_axis,
             "y_axis": y_axis,
-            "position": f"{config.get('latitude', 0):.2f}°N, {config.get('longitude', 0):.2f}°E"
+            "position": f"{config.get('latitude', 0):.2f}°N, {config.get('longitude', 0):.2f}°E",
+            "data_origin": data_origin,
+            "data_source_key": data_source_key
         },
         "plot": plot_data
     }
@@ -404,29 +492,50 @@ def show_parameter_dialog(float_data):
     """Parameter selection dialog for a selected float."""
     
     # Float information card
+    safe_name = float_data.get('name', 'Selected Float')
+    safe_id = float_data.get('id', '—')
+    safe_lat = float_data.get('latitude')
+    safe_lon = float_data.get('longitude')
+    safe_temp = float_data.get('temperature')
+    safe_status = float_data.get('status', 'Unknown')
+    safe_cycles = float_data.get('cycles')
+
+    st.subheader(f"Configure {safe_name}")
+    st.caption(
+        f"ID: {safe_id} · "
+        + (f"{safe_lat:.3f}°N, {safe_lon:.3f}°E" if safe_lat is not None and safe_lon is not None else "Location unavailable")
+    )
+
     st.markdown('<div class="float-info-card">', unsafe_allow_html=True)
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="info-row">
         <span class="info-label">Name</span>
-        <span class="info-value">{float_data['name']}</span>
+        <span class="info-value">{safe_name}</span>
     </div>
     <div class="info-row">
-        <span class="info-label">ID</span>
-        <span class="info-value">{float_data['id']}</span>
+        <span class="info-label">Float ID</span>
+        <span class="info-value">{safe_id}</span>
     </div>
     <div class="info-row">
         <span class="info-label">Location</span>
-        <span class="info-value">{float_data['latitude']:.3f}°N, {float_data['longitude']:.3f}°E</span>
+        <span class="info-value">{(f"{safe_lat:.3f}°N, {safe_lon:.3f}°E" if safe_lat is not None and safe_lon is not None else "—")}</span>
     </div>
     <div class="info-row">
-        <span class="info-label">Temperature</span>
-        <span class="info-value">{float_data['temperature']}°C</span>
+        <span class="info-label">Latest Temp</span>
+        <span class="info-value">{(f"{safe_temp:.1f}°C" if safe_temp is not None else "—")}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Cycles</span>
+        <span class="info-value">{(safe_cycles if safe_cycles is not None else "—")}</span>
     </div>
     <div class="info-row">
         <span class="info-label">Status</span>
-        <span class="info-value">{float_data['status']}</span>
+        <span class="info-value">{safe_status}</span>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Parameter selection form
@@ -585,11 +694,46 @@ def render_2d_interactive_map(argo_floats):
         mapbox=dict(style="open-street-map", center=dict(lat=20.0, lon=66.0), zoom=5),
         height=520,
         margin=dict(l=0, r=0, t=0, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        # Legend moved to bottom-left to avoid overlap with mapbox control buttons (zoom/rotation)
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=0.01,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(17,25,36,0.60)",
+            bordercolor="#243240",
+            borderwidth=1,
+            font=dict(color="#f1f5f9", size=11),
+            itemclick="toggle",
+            itemdoubleclick="toggleothers"
+        )
     )
-    plotly_events = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
-    if plotly_events and 'selection' in plotly_events and plotly_events['selection']['points']:
-        selected_point = plotly_events['selection']['points'][0]
+    event_points = []
+    if plotly_capture_events:
+        event_points = plotly_capture_events(
+            fig,
+            click_event=True,
+            select_event=True,
+            hover_event=False,
+            override_height=520,
+            key="argo_map_events",
+        ) or []
+    else:
+        chart_ctx = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key="argo_map_chart",
+        )
+        if isinstance(chart_ctx, dict):
+            selection_ctx = chart_ctx.get("selection") or chart_ctx.get("selected")
+            if selection_ctx:
+                event_points = selection_ctx.get("points", [])
+
+    if event_points:
+        selected_point = event_points[-1]
         point_index = selected_point.get('pointIndex', 0)
         curve_number = selected_point.get('curveNumber', 0)
         if curve_number == 0 and point_index < len(active_floats):
@@ -597,8 +741,8 @@ def render_2d_interactive_map(argo_floats):
         elif curve_number == 1 and point_index < len(inactive_floats):
             selected_float = inactive_floats[point_index]
         else:
-            selected_float = argo_floats[0]
-        # New marker selection: start fresh session & clear prior visualization
+            selected_float = argo_floats[min(point_index, len(argo_floats)-1)]
+
         start_new_session("marker-selected")
         st.session_state.selected_marker = selected_float
         st.session_state.show_dialog = True
@@ -715,7 +859,6 @@ with map_col:
 
 # Parameter section appears only when a marker is selected (no placeholder otherwise)
 if st.session_state.show_dialog and st.session_state.selected_marker:
-    st.subheader("Configure Visualization Parameters")
     show_parameter_dialog(st.session_state.selected_marker)
 
 if chat_col is not None:
@@ -735,13 +878,31 @@ if chat_col is not None:
             unsafe_allow_html=True,
         )
         st.header("Assistant", anchor=False)
-        st.markdown("<h4 class='copilot-section-title'>Quick Queries</h4>", unsafe_allow_html=True)
+        # New Chat button to archive existing transcript
+        new_chat_col1, new_chat_col2 = st.columns([0.55,0.45])
+        with new_chat_col1:
+            st.markdown("<h4 class='copilot-section-title'>Quick Queries</h4>", unsafe_allow_html=True)
+        with new_chat_col2:
+            # Use Streamlit's native icon support (Streamlit >= 1.31) with graceful fallback
+            clicked_new_chat = False
+            try:
+                # Attempt modern API with icon parameter (can use emoji or shortcodes)
+                clicked_new_chat = st.button("New Chat", key="new_chat_btn", icon="➕")
+            except TypeError:
+                # Fallback for older Streamlit versions without icon arg
+                clicked_new_chat = st.button("➕ New Chat", key="new_chat_btn")
+            if clicked_new_chat:
+                archive_current_chat()
+                start_new_session("new-chat-reset")
+                st.rerun()
         sample_queries = get_sample_queries()
         for i, query in enumerate(sample_queries):
             if st.button(query, key=f"sample_{i}"):
                 start_new_session("sample-query")
-                st.session_state.messages.append({"role": "user", "content": query})
+                # Clear previous chat context before showing new answer per new requirement
+                st.session_state.messages = []
                 response = simulate_query(query)
+                # Only show new answer (store assistant response only)
                 st.session_state.messages.append({"role": "assistant", "content": response["response"]})
                 cfg = parse_query_to_config(query)
                 if cfg:
@@ -761,11 +922,10 @@ if chat_col is not None:
         prompt = st.chat_input("Ask or request a visualization...", key="chat_prompt")
         if prompt:
             start_new_session("chat-query")
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            # Clear prior transcript then only display the new assistant answer (no user echo) per spec
+            st.session_state.messages = []
             with st.chat_message("assistant"):
-                with st.spinner("Thinking & charting..."):
+                with st.spinner("Processing your request..."):
                     response = simulate_query(prompt)
                     st.markdown(response["response"])
                     st.session_state.messages.append({"role": "assistant", "content": response["response"]})
@@ -854,6 +1014,20 @@ if st.session_state.get("sessions"):
         for s in reversed(st.session_state.sessions[-20:]):
             cfg = s["config"]
             st.markdown(f"**Session {s['id']}** · {s['timestamp']} · {cfg.get('parameter','?')} {cfg.get('graphType','?')} ({cfg.get('xAxis')} vs {cfg.get('yAxis')}) · Source: {cfg.get('source','?')}" )
+
+# Archived chat transcripts panel
+if st.session_state.get("chat_sessions"):
+    with st.expander("Archived Chats", expanded=False):
+        for chat in reversed(st.session_state.chat_sessions[-20:]):
+            st.markdown(f"**Chat {chat['id']}** · {chat['timestamp']}")
+            # Show a concise preview (first 120 chars of first assistant msg)
+            if chat.get('messages'):
+                preview = chat['messages'][0]['content'][:120] + ('...' if len(chat['messages'][0]['content'])>120 else '')
+                st.caption(preview)
+            with st.expander("View Transcript", expanded=False):
+                for m in chat.get('messages', []):
+                    role = m.get('role','assistant')
+                    st.markdown(f"**{role.title()}:** {m.get('content','')}")
 
 # Footer
 st.markdown("---")
