@@ -693,13 +693,25 @@ with map_col:
             st.session_state.copilot_open = not st.session_state.copilot_open
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
-    map_type = st.radio("Map Type", ["2D Interactive", "3D", "3D World Map"], horizontal=True, key="map_type_radio")
+    # Restore original explicit labels; keep backward compatibility with earlier ad-hoc edits ("3D", "3D World Map")
+    map_type = st.radio(
+        "Map Type",
+        ["2D Interactive", "3D PyDeck", "3D Cesium"],
+        horizontal=True,
+        key="map_type_radio"
+    )
+
+    # Normalize to handle legacy / user edited labels
+    mt_lower = map_type.lower()
     if map_type == "2D Interactive":
         render_2d_interactive_map(argo_floats)
-    elif map_type == "3D PyDeck":
+    elif ("pydeck" in mt_lower) or map_type in {"3D", "PyDeck"}:
         render_3d_pydeck_map(argo_floats)
-    else:
+    elif ("cesium" in mt_lower) or ("world" in mt_lower) or map_type in {"3D World Map", "World Map"}:
         create_3d_cesium_map()
+    else:
+        # Fallback: default to 2D so the UI isn't blank
+        render_2d_interactive_map(argo_floats)
 
 # Parameter section appears only when a marker is selected (no placeholder otherwise)
 if st.session_state.show_dialog and st.session_state.selected_marker:
